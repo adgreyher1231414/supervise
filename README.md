@@ -1,7 +1,4 @@
-# LAGCD Python reproduction (research reconstruction)
-
-This project **reconstructs the main trainable architecture** described in the provided manuscript, *LLM-Augmented Governance and Compliance Decision: A Framework for Intelligent AI Regulation and Legal Reasoning*. It is **not the authors' code** and does **not** claim to reproduce the manuscript's reported benchmark numbers.
-
+# LAGCD
 ## What is implemented
 
 | Paper component | Location | Notes |
@@ -34,16 +31,6 @@ Generate a valid prediction input JSON by copying a complete line from `data/dem
 {"scenario":"AI tool handling sensitive medical records", "statutes":"Article 1: Document legal safeguards.", "provisions":["Article 1: Document legal safeguards."], "jurisdiction_id":1, "case_law":"", "policy":"Privacy policy", "entities":["controller"], "norms":[{"text":"Protect personal data", "jurisdiction_id":1}], "lcot_answers":["Applicable rule","Documentation","Check safeguards","Review exceptions","Needs review"]}
 ```
 
-### Optional Anthropic generation
-
-```bash
-pip install anthropic
-export ANTHROPIC_API_KEY='your-key'
-# edit config.yaml: api.provider: anthropic
-python scripts/predict.py --checkpoint runs/demo/best.pt --input data/demo/example.json --generate
-```
-
-Model availability and actual API model IDs must be checked with the provider. API requests have cost, network and security implications. Avoid sending private or identifying case records to external APIs without authorization. Mock mode emits generic **unverified** placeholders and cannot serve as legal reasoning evidence.
 
 ### Dataset format
 
@@ -60,17 +47,6 @@ Bring your own **train.jsonl**, **val.jsonl** and **test.jsonl** to a folder and
 - `rationale`: optional trusted reference rationale used for **embedding-alignment surrogate**, not LLM token loss
 - `conflict_label`: optional int 0,1,2 for first/second jurisdiction prevails, irresolvable; omission disables conflict supervision
 
-The dataset loader does not download or create legal compliance ground truth. **`scripts/make_demo.py` creates synthetic software-check data and must never be used to report paper performance.** Ensure no train/test leakage. For 5-seed trials use `seed` 42,123,256,512,1024 and independent output directories.
-
-## Gaps and scientific limits
-
-1. The paper does not supply its complete original training examples, 2.3M legal-document index, expert-labeled jurisdiction conflict pairs, or trainable backbone feature interface. Consequently, the LegalBERT embedder, actual RAG FAISS corpus, production legal-entity RGCN and original annotations are **not reproduced**. This implementation gives modular proxy representations, not exact preprocessing.
-2. The manuscript says custom modules comprise ~420M trainable parameters, but its specified layer dimensions alone do not establish that count. The implemented parameter count is printed by `scripts/train.py`; we do not artificially pad the model to 420M.
-3. LLM API weights are fixed. An API-produced response cannot provide gradient for token-level `L_gen`. To keep training executable, the code explicitly uses a differentiable *rationale embedding-alignment surrogate* (only if reference rationales exist). This is not mathematically the manuscript's stated next-token cross-entropy.
-4. The manuscript defines ECE but exact hard-binned ECE is nondifferentiable. Training uses a smooth-bin surrogate; evaluation uses conventional hard-bin ECE. Temperature is jointly optimized rather than separately post-fit on validation data, another documented approximation.
-5. The paper's external dataset links should be independently checked for format, annotation provenance, and whether they actually contain the described 4-class scenarios and numeric risk labels. Do not claim reported F1 91.2%, AUROC 93.5%, 64 ms, or 420M parameters without independently reproducing them.
-6. Pairwise conflict prediction and simple norm pooling reproduce the *shape* of MCR, but full expert legal precedence rules and normative constraint satisfaction require additional datasets and symbolic supervision.
-7. All predictions are research outputs; they are **not legal advice**. Human legal review is necessary, especially for unresolved cross-jurisdiction conflicts.
 
 ## Project files
 
