@@ -1,46 +1,77 @@
-# Integrated Dynamic Life Cycle Assessment of UAV Last-Mile Logistics
+# LAGCD Python reproduction (research reconstruction)
 
-Python reference **implementation of the stated method**, with an illustrative self-contained experiment.
+This project **reconstructs the main trainable architecture** described in the provided manuscript, *LLM-Augmented Governance and Compliance Decision: A Framework for Intelligent AI Regulation and Legal Reasoning*. It is **not the authors' code** and does **not** claim to reproduce the manuscript's reported benchmark numbers.
 
-## Run
+## What is implemented
+
+| Paper component | Location | Notes |
+|---|---|---|
+| Statutory Parser | `lagcd/encoding.py` | 3-layer 256-d Transformer, 4 heads, 2 graph aggregation layers; hierarchical adjacency provided or approximated |
+| Legal Knowledge Encoding | `lagcd/encoding.py`, `lagcd/data.py` | statutory and context streams; simple deterministic hashing tokens; *not pretrained LegalBERT or 2.3M-case corpus* |
+| LCoT | `lagcd/lcot.py`, `lagcd/llm.py` | 5-step answers, encoded by a trainable encoder and a 1-layer GRU; optional Claude API |
+| HAR | `lagcd/har.py` | 3 layers, 4 heads, 4 distinct cross-attention streams, sigmoid jurisdiction-conditioned routing, residual/FFN |
+| MCR | `lagcd/mcr.py` | pairwise compatibility, -0.3 threshold, 3-class resolution, review flag |
+| UAC | `lagcd/uac.py` | classification, risk score 0–100, learned positive temperature |
+| Training and ablation | `lagcd/engine.py`, `scripts/train.py` | AdamW, cosine schedule, warmup, early stopping; `--ablate har` etc. |
+| Evaluation | `lagcd/metrics.py`, `scripts/evaluate.py` | macro F1, macro AUROC, MAE, ECE, confusion matrix, per-class F1 |
+
+## Quick start
 
 ```bash
 python -m pip install -r requirements.txt
-python run_experiments.py --output outputs --seed 2026 --mc 10
+python scripts/make_demo.py --n 120
+# For a fast CPU test, temporarily reduce the dimensions / epochs in config.yaml.
+python scripts/train.py --config config.yaml --data data/demo --out runs/demo
+python scripts/evaluate.py --checkpoint runs/demo/best.pt --test data/demo/test.jsonl
+python scripts/predict.py --checkpoint runs/demo/best.pt --input data/demo/example.json
 ```
 
-Outputs: `scenarios_144.csv`, `monte_carlo_results.csv` (1,440 rows), `results_144.csv`, sensitivity and ablation tables, seven publication-style demonstration PNG plots, and an ACO route demonstration JSON. `python -m unittest discover -s tests` runs unit tests.
+For a short end-to-end CPU smoke run, use `python scripts/make_demo.py --n 24`, then `python scripts/train.py --config config.smoke.yaml --data data/demo --out runs/smoke`, followed by `python scripts/evaluate.py --checkpoint runs/smoke/best.pt --test data/demo/test.jsonl`.
 
-## Implemented components
+Generate a valid prediction input JSON by copying a complete line from `data/demo/test.jsonl` to `data/demo/example.json`. Alternatively create a JSON object with keys `scenario`, `statutes`, `provisions`, `case_law`, `policy`, `entities`, `norms`, `jurisdiction_id`, `lcot_answers`. Example:
 
-- Equations (hover power), (forward power) and (induced velocity); round-trip energy and wind perturbations.
-- Battery NMC-811 retention `Q_n / Q_0 = 1 - 0.0018 sqrt(n) - 0.00042 sqrt(t_hours)`, 80% replacement rule.
-- Per-mission battery manufacturing burden and one-time battery recycling credits; airframe impacts.
-- Charging grid CI, fixed-rate fossil/H2 inputs, per-delivery life-cycle costing.
-- Energy-based ACO routing with 80 ants / 500 iterations configurable, with depot return, payload cap, and 10% tightened energy-reserve test.
-- Asymmetric 48+48+24+24 scenario design (4 zones x 3 routes x [4/4/2/2] replications), 10 wind Monte Carlo runs, 144-scenario Pareto identification, sensitivity and ablations.
+```json
+{"scenario":"AI tool handling sensitive medical records", "statutes":"Article 1: Document legal safeguards.", "provisions":["Article 1: Document legal safeguards."], "jurisdiction_id":1, "case_law":"", "policy":"Privacy policy", "entities":["controller"], "norms":[{"text":"Protect personal data", "jurisdiction_id":1}], "lcot_answers":["Applicable rule","Documentation","Check safeguards","Review exceptions","Needs review"]}
+```
 
-## Critical reproduction limitations
+### Optional Anthropic generation
 
-This manuscript did not supply the actual 3,850 OSM routes, 2022–2023 hourly 47-zone ENTSO-E marginal emission factors, licensed ecoinvent 3.10 process inventories, published mission-level validation set, calibrated vehicle aerodynamic/phase parameters, manufacturers' purchase costs, nor the supplementary scenario list. **This repository does not pretend to reproduce those inputs.** It uses clearly editable `PLATFORMS`, `GRID_ZONES`, and `ROUTES_KM` DEMO assumptions. Its generated numbers **must not** be published as reproductions of the paper's figures or external MAE.
+```bash
+pip install anthropic
+export ANTHROPIC_API_KEY='your-key'
+# edit config.yaml: api.provider: anthropic
+python scripts/predict.py --checkpoint runs/demo/best.pt --input data/demo/example.json --generate
+```
 
-Key differences:
+Model availability and actual API model IDs must be checked with the provider. API requests have cost, network and security implications. Avoid sending private or identifying case records to external APIs without authorization. Mock mode emits generic **unverified** placeholders and cannot serve as legal reasoning evidence.
 
-1. Fuel rates, hydrogen rates, platform drag/rotor properties, life-cycle purchase costs, motor efficiency and airframe manufacturing burden are placeholders. Replace with evidence-based inputs before scientific claims.
-2. The route generator uses one representative distance per class with small jitter, rather than actual OSM spatial records. ACO demo solves a tiny single-UAV multi-stop route but is **not used** to create the 144 delivery route inputs.
-3. Grid zones: four representative numeric CI values (68, 185, 239, 478 g/kWh) to reflect the paper's reported 36 low / 72 mixed / 36 high scenario counts. Not true hourly ENTSO-E data. `hourly_weighted_ci` is available for user-provided charging profiles.
-4. The published corrected degradation equation and the cited ~1140 EOL cycles are **not necessarily mutually consistent** for a 5-year calendar life. With `t=43800 h`, the calendar term alone is ~0.0879 capacity loss, making EOL occur much earlier than 1140 cycles. The code follows the *equation*, not a forced replacement schedule.
-5. The paper describes both **four grid-mix zones** and a **three-stratum** 36/72/36 table; this implementation uses two mixed zones. Individual zones are synthetic, as the detailed supplementary allocation is unavailable.
-6. Cost/EOL parameters absent from the article are documented example inputs. The cross-platform outputs depend strongly on them.
-7. A single-UAV capacity constraint is applied to the multi-stop ACO demonstration; published route-level formulation is otherwise underspecified for practical exact reconstruction.
-8. Sensitivity elasticities here are finite-difference, and ablation MAE is **relative to our own full model**, not an external accuracy metric.
+### Dataset format
 
-## How to use real data
+Bring your own **train.jsonl**, **val.jsonl** and **test.jsonl** to a folder and point `--data` to it. Each row is a JSON object:
 
-- Populate platform entries in `idlca/core.py` with real aircraft properties, certified propulsion efficiencies, actual per-stage flight durations, purchased costs, material mass inventories and service lives.
-- Replace `build_scenarios()` with a dataframe built from the provided OSM route geometries and matched ENTSO-E **marginal** hourly grid data (including cross-border attribution and 2022–2023 interpolation). Use `hourly_weighted_ci()` for multi-hour charging events.
-- Substitute process GWP factors from your licensed ecoinvent/Brightway2 export and apply the declared ReCiPe 2016 Midpoint (H) GWP100 method. Validate impact-accounting conventions and allocation with the LCA practitioner.
-- Calibrate the battery degradation coefficients with the **actual** NMC 811 experimental capacity curves; externally validate the energy model with flight telemetry.
-- Recompute all plots and uncertainties after replacing assumptions, including independent inventory uncertainty if appropriate.
+- `id`, `scenario`, `statutes`: strings (scenario is used by API mode, statutes supply input provisions)
+- `provisions`: list of article/paragraph texts; `edges`: optional `[parent_index,child_index]` pairs
+- `case_law`, `policy`, `entities`: strings or lists of strings
+- `norms`: list of `{ "text": ..., "jurisdiction_id": 0 }`, with integers in `[0, num_jurisdictions)`
+- `jurisdiction_id`: numeric ID; keep mapping consistent between train and test
+- `lcot_answers`: exactly five strings; use a trusted fixed API for preprocessing if desired
+- `label`: integer 0–3 (`compliant`, `minor_risk`, `major_risk`, `non_compliant`)
+- `risk`: numeric in 0–100; optional, ignored for MSE if missing
+- `rationale`: optional trusted reference rationale used for **embedding-alignment surrogate**, not LLM token loss
+- `conflict_label`: optional int 0,1,2 for first/second jurisdiction prevails, irresolvable; omission disables conflict supervision
 
-**Source:** uploaded manuscript titled *Integrated Dynamic Life Cycle Assessment of Economic and Carbon Footprint Impacts in UAV-Based Last-Mile Logistics*.
+The dataset loader does not download or create legal compliance ground truth. **`scripts/make_demo.py` creates synthetic software-check data and must never be used to report paper performance.** Ensure no train/test leakage. For 5-seed trials use `seed` 42,123,256,512,1024 and independent output directories.
+
+## Gaps and scientific limits
+
+1. The paper does not supply its complete original training examples, 2.3M legal-document index, expert-labeled jurisdiction conflict pairs, or trainable backbone feature interface. Consequently, the LegalBERT embedder, actual RAG FAISS corpus, production legal-entity RGCN and original annotations are **not reproduced**. This implementation gives modular proxy representations, not exact preprocessing.
+2. The manuscript says custom modules comprise ~420M trainable parameters, but its specified layer dimensions alone do not establish that count. The implemented parameter count is printed by `scripts/train.py`; we do not artificially pad the model to 420M.
+3. LLM API weights are fixed. An API-produced response cannot provide gradient for token-level `L_gen`. To keep training executable, the code explicitly uses a differentiable *rationale embedding-alignment surrogate* (only if reference rationales exist). This is not mathematically the manuscript's stated next-token cross-entropy.
+4. The manuscript defines ECE but exact hard-binned ECE is nondifferentiable. Training uses a smooth-bin surrogate; evaluation uses conventional hard-bin ECE. Temperature is jointly optimized rather than separately post-fit on validation data, another documented approximation.
+5. The paper's external dataset links should be independently checked for format, annotation provenance, and whether they actually contain the described 4-class scenarios and numeric risk labels. Do not claim reported F1 91.2%, AUROC 93.5%, 64 ms, or 420M parameters without independently reproducing them.
+6. Pairwise conflict prediction and simple norm pooling reproduce the *shape* of MCR, but full expert legal precedence rules and normative constraint satisfaction require additional datasets and symbolic supervision.
+7. All predictions are research outputs; they are **not legal advice**. Human legal review is necessary, especially for unresolved cross-jurisdiction conflicts.
+
+## Project files
+
+`lagcd/{data,encoding,lcot,har,mcr,uac,model,losses,metrics,engine,llm,utils}.py`, `scripts/{make_demo,train,evaluate,predict}.py`, `tests/test_smoke.py`, `config.yaml`, `requirements.txt`.
